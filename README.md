@@ -48,6 +48,6 @@ With that I verified that the sleep return was casued by the timout. But the int
 	  Serial.print("######## sleeptime: ");Serial.println(sleeptime);
 	  #endif
 
-and the 300000UL did the trick. The sketch now wakes up by either the interrupt PIN or the specified timeout.
+and the 600000UL did the trick. The sketch now wakes up by either the interrupt PIN or the specified timeout.
 
 The Arduino compiler did too much code and memory optimization and stored the 600000 in a smaller memory area than needed by an unsigned long. If that value is supplied to a function that looks for an unsigned long, the value will be interpreted differently and gives the wrong number!
