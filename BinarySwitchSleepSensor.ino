@@ -33,6 +33,19 @@
 // Enable debug prints to serial monitor
 #define MY_DEBUG 
 
+#ifdef MY_DEBUG
+#define DEBUG_SERIAL(x) Serial.begin(x)
+#define DEBUG_PRINT(x) Serial.print(x)
+#define DEBUG_PRINTLN(x) Serial.println(x)
+#else
+#define DEBUG_SERIAL(x)
+#define DEBUG_PRINT(x) 
+#define DEBUG_PRINTLN(x) 
+#endif
+
+// LED on PB0 / digital pin 8
+#define LED_PIN PB0
+
 //send with ACK set?
 #define NEED_ACK false
 
@@ -42,13 +55,23 @@
 // Enable and select radio type attached
 #define MY_RADIO_NRF24
 //#define MY_RADIO_RFM69
+#define MY_NODE_ID 44 // Sets a static id for a node
+
+#undef MY_REGISTRATION_FEATURE // If enabled, node has to register to gateway/controller before allowed to send sensor data.
 
 #include <SPI.h>
 #include <MySensors.h>
 
+#include <SI7021.h>
+SI7021 humiditySensor;
+bool bUseTempHumi=false;
+
 #define SKETCH_NAME "BinarySwitchSleepSensor"
 #define SKETCH_MAJOR_VER "1"
 #define SKETCH_MINOR_VER "2"
+
+#define CHILD_ID_TEMP 0
+#define CHILD_ID_HUM 1
 
 #define PRIMARY_CHILD_ID 3
 #define SECONDARY_CHILD_ID 4
@@ -70,6 +93,8 @@
 #endif
  
 
+MyMessage msgTemp(CHILD_ID_TEMP,V_TEMP); // Initialize temperature message
+MyMessage msgHum(CHILD_ID_HUM,V_HUM);
 // Change to V_LIGHT if you use S_LIGHT in presentation below
 MyMessage msg(PRIMARY_CHILD_ID, V_TRIPPED);
 MyMessage msg2(SECONDARY_CHILD_ID, V_TRIPPED);
@@ -90,18 +115,38 @@ void setup()
 #else
    analogReference(INTERNAL);
 #endif
+
+#ifdef LED_PIN
+   pinMode(LED_PIN, OUTPUT);
+   digitalWrite(LED_PIN, LOW);
+#endif
+
+  if(humiditySensor.begin()){
+      DEBUG_PRINT("Si7021 ready: ");
+      DEBUG_PRINT(humiditySensor.getHumidityPercent());
+      DEBUG_PRINTLN("/");
+      DEBUG_PRINTLN(humiditySensor.getCelsiusHundredths()/100);
+      bUseTempHumi=true;
+  }
+  else{
+      DEBUG_PRINTLN("Si7021 NOT ready");
+      bUseTempHumi=false;
+  }
 }
 
 void presentation() {
   // Send the sketch version information to the gateway and Controller
   sendSketchInfo(SKETCH_NAME, SKETCH_MAJOR_VER "." SKETCH_MINOR_VER);
 
+  present(CHILD_ID_TEMP, S_TEMP);   // Present sensor to controller
+  present(CHILD_ID_HUM, S_HUM);
   // Register binary input sensor to sensor_node (they will be created as child devices)
   // You can use S_DOOR, S_MOTION or S_LIGHT here depending on your usage. 
   // If S_LIGHT is used, remember to update variable type you send in. See "msg" above.
   // void present(uint8_t sensorId, uint8_t sensorType, const char* description="", bool ack=false)
   present(PRIMARY_CHILD_ID, S_DOOR, "pin D2", NEED_ACK);  
-  present(SECONDARY_CHILD_ID, S_DOOR, "pin D3", NEED_ACK);  
+  present(SECONDARY_CHILD_ID, S_DOOR, "pin D3", NEED_ACK);
+  blinkLED();  
 }
 
 // Loop will iterate on changes on the BUTTON_PINs
@@ -111,9 +156,11 @@ void loop()
   static uint8_t sentValue=2;
   static uint8_t sentValue2=2;
 
+  sendTempHumidityMeasurements(true);
+
   // Short delay to allow buttons to properly settle
   delay(5);
-  
+  blinkLED();
   value = digitalRead(PRIMARY_BUTTON_PIN);
   
   if (true /*value != sentValue*/) {
@@ -131,10 +178,10 @@ void loop()
      sentValue2 = value;
   }
 
-  sendBatteryLevel(getBatteryLevel(), NEED_ACK);
+  sendBatteryLevel(getBatteryLevel());
 
   //define sleeptime as unsigned long and use UL specifier! or you get weird numbers :-((
-  unsigned long sleeptime = 300000UL; // 10 minutes 1000*60*10 = 24h / 60minuten * 10
+  unsigned long sleeptime = 300000UL; // 10 minutes 1000*60*10, 5 minutes 1000*60*5
   #ifdef MY_DEBUG
   Serial.print("######## sleeptime: ");Serial.println(sleeptime);
   #endif
@@ -144,8 +191,10 @@ void loop()
   //sleep returns -1 for timeout, or the PIN INT (first or second INT argument) that fired the interrupt!
   switch (mysleep){
     case -1:    
+      
       send(msg2.set(value==HIGH ? 1 : 0), NEED_ACK);
-      sendBatteryLevel(getBatteryLevel(), NEED_ACK);
+      sendBatteryLevel(getBatteryLevel());
+      //blinkLED();
       #ifdef MY_DEBUG
       Serial.println("######## wake up by time out");
       #endif
@@ -201,3 +250,52 @@ int getBatteryLevel ()
     batteryPcnt=100;
    return batteryPcnt;
 }
+
+void blinkLED(){
+#ifndef LED_PIN
+   return;
+#endif
+   digitalWrite(LED_PIN, HIGH);
+   delay(200);
+   digitalWrite(LED_PIN, LOW);
+}
+
+/*********************************************
+ * * Sends temperature and humidity from Si7021 sensor
+ * Parameters
+ * - force : Forces transmission of a value (even if it's the same as previous measurement)
+ *********************************************/
+void sendTempHumidityMeasurements(bool force) {
+  if(bUseTempHumi==false)
+    return;
+  DEBUG_PRINTLN("sendTempHumidityMeasurements...");
+  bool tx = force;
+
+  si7021_thc data;// = humiditySensor.getTempAndRH();  //BLOCKS FOREVER
+  data.humidityPercent = humiditySensor.getHumidityPercent();
+  data.celsiusHundredths = humiditySensor.getCelsiusHundredths();
+  
+  float temperature = data.celsiusHundredths / 100.0;
+  DEBUG_PRINT("T: ");DEBUG_PRINTLN(temperature);
+
+    send(msgTemp.set(temperature,1));
+  
+  int humidity = data.humidityPercent;
+  DEBUG_PRINT("H: ");DEBUG_PRINTLN(humidity);
+
+  send(msgHum.set(humidity));
+
+  DEBUG_PRINTLN("sendTempHumidityMeasurements...END");
+
+}
+
+void receive(const MyMessage &message)
+{
+  // We only expect one type of message from controller. But we better check anyway.
+  if (message.isAck()) {
+    // Write some debug info
+    Serial.print("Incoming ACK for sensor: ");
+    Serial.print(message.sensor);
+  }
+}
+
