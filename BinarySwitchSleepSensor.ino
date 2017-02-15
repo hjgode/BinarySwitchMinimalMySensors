@@ -44,10 +44,10 @@
 #endif
 
 // LED on PB0 / digital pin 8
-#define LED_PIN PB0
+//#define LED_PIN PB0
 
 //send with ACK set?
-#define NEED_ACK false
+#define NEED_ACK true
 
 #define SLEEP_IN_MS 86400000 // 1 day
 #define BATTERY_SENSE_PIN  A0  // select the input pin for the battery sense point
@@ -66,7 +66,7 @@
 SI7021 humiditySensor;
 bool bUseTempHumi=false;
 
-#define SKETCH_NAME "BinarySwitchSleepSensor"
+#define SKETCH_NAME "BinarySwitchSleepSensor 1h"
 #define SKETCH_MAJOR_VER "1"
 #define SKETCH_MINOR_VER "2"
 
@@ -101,6 +101,13 @@ MyMessage msg2(SECONDARY_CHILD_ID, V_TRIPPED);
 
 void setup()  
 {  
+  //set unused pins for low power
+  pinMode(4,INPUT); digitalWrite (4, LOW); 
+  pinMode(5,INPUT); digitalWrite (5, LOW); 
+  pinMode(6,INPUT); digitalWrite (6, LOW); 
+  pinMode(7,INPUT); digitalWrite (7, LOW); 
+  pinMode(8,INPUT); digitalWrite (8, LOW); 
+
   // Setup the buttons
   pinMode(PRIMARY_BUTTON_PIN, INPUT_PULLUP);
   pinMode(SECONDARY_BUTTON_PIN, INPUT_PULLUP);
@@ -137,9 +144,10 @@ void setup()
 void presentation() {
   // Send the sketch version information to the gateway and Controller
   sendSketchInfo(SKETCH_NAME, SKETCH_MAJOR_VER "." SKETCH_MINOR_VER);
-
+if (bUseTempHumi){
   present(CHILD_ID_TEMP, S_TEMP);   // Present sensor to controller
   present(CHILD_ID_HUM, S_HUM);
+}
   // Register binary input sensor to sensor_node (they will be created as child devices)
   // You can use S_DOOR, S_MOTION or S_LIGHT here depending on your usage. 
   // If S_LIGHT is used, remember to update variable type you send in. See "msg" above.
@@ -155,8 +163,8 @@ void loop()
   uint8_t value;
   static uint8_t sentValue=2;
   static uint8_t sentValue2=2;
-
-  sendTempHumidityMeasurements(true);
+  if (bUseTempHumi)
+    sendTempHumidityMeasurements(true);
 
   // Short delay to allow buttons to properly settle
   delay(5);
@@ -181,14 +189,16 @@ void loop()
   sendBatteryLevel(getBatteryLevel());
 
   //define sleeptime as unsigned long and use UL specifier! or you get weird numbers :-((
-  unsigned long sleeptime = 300000UL; // 10 minutes 1000*60*10, 5 minutes 1000*60*5
+  unsigned long sleeptime = 2UL * 300000UL; // 12 * 5Min=60Min; 10 minutes 1000*60*10, 5 minutes 1000*60*5
   #ifdef MY_DEBUG
   Serial.print("######## sleeptime: ");Serial.println(sleeptime);
   #endif
+  
   // Sleep until something happens with the sensor
   //int8_t mysleep=sleep(PRIMARY_BUTTON_PIN-2, CHANGE, SECONDARY_BUTTON_PIN-2, CHANGE, /*0*/ sleeptime);
   int8_t mysleep=sleep(SECONDARY_BUTTON_PIN-2, CHANGE, sleeptime);
   //sleep returns -1 for timeout, or the PIN INT (first or second INT argument) that fired the interrupt!
+  
   switch (mysleep){
     case -1:    
       
@@ -254,10 +264,11 @@ int getBatteryLevel ()
 void blinkLED(){
 #ifndef LED_PIN
    return;
-#endif
+#else
    digitalWrite(LED_PIN, HIGH);
    delay(200);
    digitalWrite(LED_PIN, LOW);
+#endif
 }
 
 /*********************************************
